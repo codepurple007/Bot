@@ -1,0 +1,538 @@
+import { Bot, Context, InlineKeyboard } from "grammy";
+
+export type EnvConfig = {
+	BOT_TOKEN: string;
+	ADMIN_IDS: number[]; // parsed list of admin Telegram user IDs
+	TARGET_GROUP_ID?: number; // optional: where to post anonymous messages (group mode)
+	TARGET_CHANNEL_ID?: number; // optional: channel id for posting anon submissions
+	BOT_USERNAME?: string; // without @
+	CHANNEL_USERNAME?: string; // without @, for channel link
+};
+
+// Comment structure stored in memory
+type Comment = {
+	id: number;
+	text: string;
+	timestamp: number;
+	userId: number; // stored but not shown to users (for moderation)
+};
+
+export function createBot(env: EnvConfig) {
+	const bot = new Bot<Context>(env.BOT_TOKEN);
+
+	// In-memory state for channel comments mode
+	const channelComments = new Map<number, Comment[]>(); // channelMsgId -> comments array
+	const userIdToPendingChannelMsg = new Map<number, number>(); // userId -> channelMsgId (when adding comment)
+	let ventCounter = 0; // Counter for "UnKnown vent" numbering
+	let commentIdCounter = 0; // Counter for unique comment IDs
+
+  // Helper function to update channel post buttons
+  const updateChannelButtons = async (channelMsgId: number) => {
+    if (!env.TARGET_CHANNEL_ID || !env.BOT_USERNAME) return;
+    
+    const addUrl = `https://t.me/${env.BOT_USERNAME}?start=comment_${channelMsgId}`;
+    const viewUrl = `https://t.me/${env.BOT_USERNAME}?start=view_${channelMsgId}`;
+    
+    // Get comment count for this channel message
+    const comments = channelComments.get(channelMsgId) || [];
+    const commentCount = comments.length;
+    const viewButtonText = commentCount > 0 ? `View comments (${commentCount})` : "View comments";
+    
+    console.log(`[Channel] Updating buttons for message ${channelMsgId}:`);
+    console.log(`[Channel] - Comment count: ${commentCount}`);
+    console.log(`[Channel] - Comments array:`, comments);
+    console.log(`[Channel] - Button text will be: "${viewButtonText}"`);
+    console.log(`[Channel] - All stored channel comments keys:`, Array.from(channelComments.keys()));
+    
+    const kb = new InlineKeyboard();
+    kb.url("Add comment", addUrl);
+    kb.url(viewButtonText, viewUrl);
+    
+    try {
+      const result = await bot.api.editMessageReplyMarkup(env.TARGET_CHANNEL_ID, channelMsgId, { reply_markup: kb });
+      console.log(`[Channel] ✅ Successfully updated buttons for message ${channelMsgId} (${commentCount} comments)`);
+      console.log(`[Channel] ✅ Button text: "${viewButtonText}"`);
+      console.log(`[Channel] ✅ API result:`, result);
+    } catch (e: any) {
+      console.error(`[Channel] ❌ Failed to update buttons for message ${channelMsgId}:`, e.description || e.message);
+      console.error(`[Channel] ❌ Error code:`, e.error_code);
+      console.error(`[Channel] ❌ Full error:`, JSON.stringify(e, null, 2));
+      // Don't throw - button update failure shouldn't break the flow
+    }
+  };
+
+  // Helper function to format comments for display
+  const formatComments = (comments: Comment[]): string => {
+    if (comments.length === 0) {
+      return "No comments yet. Be the first to comment!";
+    }
+    
+    return comments.map((comment, index) => {
+      const date = new Date(comment.timestamp).toLocaleString();
+      return `${index + 1}. ${comment.text}\n   <i>${date}</i>`;
+    }).join("\n\n");
+  };
+
+	// Helpers
+	const isAdmin = (userId: number | undefined) =>
+		userId !== undefined && env.ADMIN_IDS.includes(userId);
+
+	// Commands
+	bot.command("start", async (ctx) => {
+		const payload = ctx.match as unknown as string | undefined;
+		const startParam = typeof payload === "string" ? payload.trim() : "";
+		
+		// Handle "Add comment" button click
+		const commentMatch = startParam.match(/^comment_(\d+)$/);
+		if (commentMatch) {
+			const channelMsgId = Number(commentMatch[1]);
+			if (Number.isFinite(channelMsgId)) {
+				userIdToPendingChannelMsg.set(ctx.from!.id, channelMsgId);
+				await ctx.reply(
+					"💬 Send your anonymous comment now. It will be added to the post.",
+					{ link_preview_options: { is_disabled: true }, parse_mode: "HTML" }
+				);
+				return;
+			}
+		}
+		
+		// Handle "View comments" button click
+		const viewMatch = startParam.match(/^view_(\d+)$/);
+		if (viewMatch) {
+			const channelMsgId = Number(viewMatch[1]);
+			if (Number.isFinite(channelMsgId)) {
+				const comments = channelComments.get(channelMsgId) || [];
+				const commentsText = formatComments(comments);
+				
+				// Update button to ensure count is current
+				await updateChannelButtons(channelMsgId);
+				
+				await ctx.reply(
+					`📝 <b>Comments for this post:</b>\n\n${commentsText}`,
+					{ 
+						link_preview_options: { is_disabled: true },
+						parse_mode: "HTML"
+					}
+				);
+				
+				// Add button to add a comment
+				if (env.BOT_USERNAME) {
+					const kb = new InlineKeyboard();
+					kb.url("Add a comment", `https://t.me/${env.BOT_USERNAME}?start=comment_${channelMsgId}`);
+					await ctx.reply("💬 Want to add your own comment?", { reply_markup: kb });
+				}
+				return;
+			}
+		}
+
+		// Default start message
+		await ctx.reply(
+			"This is an anonymous bot. Send whatever you feel—your message will be delivered without revealing your identity to others.",
+			{ link_preview_options: { is_disabled: true } }
+		);
+  });
+
+	bot.command("whoami", async (ctx) => {
+    const id = ctx.from?.id;
+    const username = ctx.from?.username ? `@${ctx.from.username}` : "<no username>";
+    await ctx.reply(`Your user ID: ${id}\nUsername: ${username}`);
+  });
+
+  // Get group chat ID (run inside the group)
+  bot.command("groupid", async (ctx) => {
+    const chat = ctx.chat;
+    if (!chat) return;
+    if (chat.type === "group" || chat.type === "supergroup") {
+      await ctx.reply(`Group chat ID: ${chat.id}`);
+    } else {
+      await ctx.reply("Run this inside the group to get its chat ID.");
+    }
+  });
+
+  // Get message ID (reply to a message to get its ID)
+  bot.command("msgid", async (ctx) => {
+    if (!ctx.message) return;
+    if (ctx.message.reply_to_message) {
+      const replied = ctx.message.reply_to_message;
+      await ctx.reply(`Message ID: ${replied.message_id}\nChat ID: ${ctx.chat?.id}`);
+    } else {
+      await ctx.reply("Reply to a message to get its ID.");
+    }
+  });
+
+  // Admin command to test channel access
+  bot.command("testchannel", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) {
+      await ctx.reply("Admin only command.");
+      return;
+    }
+    if (!env.TARGET_CHANNEL_ID) {
+      await ctx.reply("TARGET_CHANNEL_ID not configured.");
+      return;
+    }
+    try {
+      const info = await ctx.api.getChat(env.TARGET_CHANNEL_ID);
+      await ctx.reply(`✅ Channel accessible!\nTitle: ${info.title || 'N/A'}\nType: ${info.type}\nID: ${info.id}`);
+      
+      // Try sending a test message
+      const testMsg = await ctx.api.sendMessage(env.TARGET_CHANNEL_ID, "🤖 Bot test message - you can delete this");
+      await ctx.reply(`✅ Successfully posted test message (ID: ${testMsg.message_id})`);
+    } catch (error: any) {
+      await ctx.reply(`❌ Channel access failed:\n${error.description || error.message}\n\nMake sure:\n1. Bot is added to channel\n2. Bot is admin with post permission\n3. Channel ID is correct`);
+    }
+  });
+
+  // Admin command to update buttons for a specific channel post
+  bot.command("updatebuttons", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) {
+      await ctx.reply("Admin only command.");
+      return;
+    }
+    const args = (ctx.match as string || "").trim().split(/\s+/);
+    if (args.length < 1) {
+      await ctx.reply("Usage: /updatebuttons <channel_msg_id>\nExample: /updatebuttons 6");
+      return;
+    }
+    const channelMsgId = Number(args[0]);
+    
+    if (!Number.isFinite(channelMsgId)) {
+      await ctx.reply("Channel message ID must be a number.");
+      return;
+    }
+    
+    const comments = channelComments.get(channelMsgId) || [];
+    const commentCount = comments.length;
+    
+    try {
+      await updateChannelButtons(channelMsgId);
+      await ctx.reply(`✅ Updated buttons for channel message ${channelMsgId}\n📊 Comments found: ${commentCount}\nExpected button text: "View comments${commentCount > 0 ? ` (${commentCount})` : ''}"`);
+    } catch (error: any) {
+      await ctx.reply(`❌ Failed to update buttons: ${error.description || error.message}`);
+    }
+  });
+
+  // Admin command to check comments for a channel post
+  bot.command("checkcomments", async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) {
+      await ctx.reply("Admin only command.");
+      return;
+    }
+    const args = (ctx.match as string || "").trim().split(/\s+/);
+    if (args.length < 1) {
+      await ctx.reply("Usage: /checkcomments <channel_msg_id>\nExample: /checkcomments 6");
+      return;
+    }
+    const channelMsgId = Number(args[0]);
+    
+    if (!Number.isFinite(channelMsgId)) {
+      await ctx.reply("Channel message ID must be a number.");
+      return;
+    }
+    
+    const comments = channelComments.get(channelMsgId) || [];
+    const commentCount = comments.length;
+    
+    if (commentCount === 0) {
+      await ctx.reply(`📊 Channel message ${channelMsgId} has no comments stored.`);
+    } else {
+      const commentList = comments.map((c, i) => `${i + 1}. ${c.text.substring(0, 50)}${c.text.length > 50 ? '...' : ''}`).join('\n');
+      await ctx.reply(`📊 Channel message ${channelMsgId} has ${commentCount} comment(s):\n\n${commentList}`);
+    }
+  });
+
+  // Admin-only helpers (stateless; minimal)
+  bot.command("help", async (ctx) => {
+    if (isAdmin(ctx.from?.id)) {
+      await ctx.reply(
+        "Admin help: Reply to a forwarded message to respond anonymously to the user."
+      );
+    }
+  });
+
+  // Core routing
+  bot.on("message", async (ctx) => {
+    const fromId = ctx.from?.id;
+    if (!fromId) return;
+    
+    const isUserAdmin = isAdmin(fromId);
+    console.log(`[Message] Received from user ${fromId} (admin: ${isUserAdmin}), chat type: ${ctx.chat?.type}`);
+
+    // If message is in a group, delete to preserve anonymity and instruct users
+    if (ctx.chat?.type === "group" || ctx.chat?.type === "supergroup") {
+      if (!ctx.from?.is_bot) {
+        try { await ctx.deleteMessage(); } catch {}
+        await ctx.reply(
+          "To post anonymously here, DM your message to me and I'll share it in this group."
+        );
+      }
+      return;
+    }
+
+    // If admin replies to a forwarded message, route to original user
+    if (isAdmin(fromId) && ctx.message.reply_to_message) {
+      const original = ctx.message.reply_to_message;
+      const text = (original.text || original.caption || "").toString();
+
+      // Parse embedded user ID from forwarded message heading
+      // Format used: [anon] From <username> (ID <id>)
+      const match = text.match(/\(ID\s+(\d+)\)/);
+      const targetUserId = match ? Number(match[1]) : undefined;
+      if (!targetUserId) {
+        await ctx.reply("Could not find original user ID in the replied message.");
+        return;
+      }
+
+      // Forward admin's reply anonymously to target user
+      if (ctx.message.text) {
+        await ctx.api.sendMessage(
+          targetUserId,
+          ctx.message.text
+        );
+      } else if (ctx.message.photo) {
+        const largest = ctx.message.photo[ctx.message.photo.length - 1];
+        await ctx.api.sendPhoto(targetUserId, largest.file_id, {
+          caption: ctx.message.caption,
+        });
+      } else if (ctx.message.document) {
+        await ctx.api.sendDocument(targetUserId, ctx.message.document.file_id, {
+          caption: ctx.message.caption,
+        });
+      } else if (ctx.message.audio) {
+        await ctx.api.sendAudio(targetUserId, ctx.message.audio.file_id, {
+          caption: ctx.message.caption,
+        });
+      } else if (ctx.message.voice) {
+        await ctx.api.sendVoice(targetUserId, ctx.message.voice.file_id, {
+          caption: ctx.message.caption,
+        });
+      } else if (ctx.message.video) {
+        await ctx.api.sendVideo(targetUserId, ctx.message.video.file_id, {
+          caption: ctx.message.caption,
+        });
+      } else if (ctx.message.sticker) {
+        await ctx.api.sendSticker(targetUserId, ctx.message.sticker.file_id);
+      } else {
+        await ctx.reply("Unsupported message type for reply.");
+      }
+
+      return;
+    }
+
+    // Channel comments flow: if user previously clicked Add comment
+    if (ctx.chat?.type === "private" && userIdToPendingChannelMsg.has(fromId)) {
+      const channelMsgId = userIdToPendingChannelMsg.get(fromId)!;
+      userIdToPendingChannelMsg.delete(fromId);
+
+      console.log(`[Comment] User ${fromId} wants to add comment to channel message ${channelMsgId}`);
+      
+      // Extract comment text
+      let commentText: string;
+      if (ctx.message.text) {
+        commentText = ctx.message.text;
+      } else if (ctx.message.caption) {
+        commentText = ctx.message.caption;
+      } else if (ctx.message.photo) {
+        commentText = "[Photo]";
+      } else if (ctx.message.document) {
+        commentText = `[Document: ${ctx.message.document.file_name || "file"}]`;
+      } else if (ctx.message.audio) {
+        commentText = `[Audio: ${ctx.message.audio.title || "audio"}]`;
+      } else if (ctx.message.voice) {
+        commentText = "[Voice message]";
+      } else if (ctx.message.video) {
+        commentText = "[Video]";
+      } else if (ctx.message.sticker) {
+        commentText = "[Sticker]";
+      } else {
+        await ctx.reply("❌ Unsupported message type for comment. Please send text, photo, or media with caption.");
+        return;
+      }
+
+      // Store comment in memory
+      commentIdCounter++;
+      const comment: Comment = {
+        id: commentIdCounter,
+        text: commentText,
+        timestamp: Date.now(),
+        userId: fromId
+      };
+
+      // Get or create comments array for this channel message
+      if (!channelComments.has(channelMsgId)) {
+        channelComments.set(channelMsgId, []);
+      }
+      channelComments.get(channelMsgId)!.push(comment);
+
+      const totalComments = channelComments.get(channelMsgId)!.length;
+      console.log(`[Comment] ✅ Comment stored for channel message ${channelMsgId}. Total comments: ${totalComments}`);
+      console.log(`[Comment] All comments for ${channelMsgId}:`, channelComments.get(channelMsgId));
+      
+      // Update the channel buttons to show new comment count
+      console.log(`[Comment] Updating buttons for channel message ${channelMsgId}...`);
+      await updateChannelButtons(channelMsgId);
+      console.log(`[Comment] Button update completed for channel message ${channelMsgId}`);
+      
+      await ctx.reply(
+        "✅ Your anonymous comment was added! Others can view it by clicking 'View comments' on the channel post.",
+        { link_preview_options: { is_disabled: true } }
+      );
+      return;
+    }
+
+    // From normal user → forward to admin with embedded ID
+    const username = ctx.from?.username ? `@${ctx.from.username}` : "<no username>";
+    const header = `[anon] From ${username} (ID ${fromId})`;
+
+    for (const adminId of env.ADMIN_IDS) {
+      if (ctx.message.text) {
+        await ctx.api.sendMessage(adminId, `${header}\n\n${ctx.message.text}`);
+      } else if (ctx.message.photo) {
+        const largest = ctx.message.photo[ctx.message.photo.length - 1];
+        await ctx.api.sendPhoto(adminId, largest.file_id, {
+          caption: ctx.message.caption ? `${header}\n\n${ctx.message.caption}` : header,
+        });
+      } else if (ctx.message.document) {
+        await ctx.api.sendDocument(adminId, ctx.message.document.file_id, {
+          caption: ctx.message.caption ? `${header}\n\n${ctx.message.caption}` : header,
+        });
+      } else if (ctx.message.audio) {
+        await ctx.api.sendAudio(adminId, ctx.message.audio.file_id, {
+          caption: ctx.message.caption ? `${header}\n\n${ctx.message.caption}` : header,
+        });
+      } else if (ctx.message.voice) {
+        await ctx.api.sendVoice(adminId, ctx.message.voice.file_id, {
+          caption: ctx.message.caption ? `${header}\n\n${ctx.message.caption}` : header,
+        });
+      } else if (ctx.message.video) {
+        await ctx.api.sendVideo(adminId, ctx.message.video.file_id, {
+          caption: ctx.message.caption ? `${header}\n\n${ctx.message.caption}` : header,
+        });
+      } else if (ctx.message.sticker) {
+        await ctx.api.sendMessage(adminId, `${header}\n\n[sticker]`);
+        await ctx.api.sendSticker(adminId, ctx.message.sticker.file_id);
+      } else {
+        await ctx.reply("Unsupported message type. Try sending text or media.");
+      }
+    }
+
+    // Also post to target group anonymously, if configured
+    if (env.TARGET_GROUP_ID) {
+      const gid = env.TARGET_GROUP_ID;
+      if (ctx.message.text) {
+        await ctx.api.sendMessage(gid, ctx.message.text);
+      } else if (ctx.message.photo) {
+        const largest = ctx.message.photo[ctx.message.photo.length - 1];
+        await ctx.api.sendPhoto(gid, largest.file_id, { caption: ctx.message.caption || undefined });
+      } else if (ctx.message.document) {
+        await ctx.api.sendDocument(gid, ctx.message.document.file_id, { caption: ctx.message.caption || undefined });
+      } else if (ctx.message.audio) {
+        await ctx.api.sendAudio(gid, ctx.message.audio.file_id, { caption: ctx.message.caption || undefined });
+      } else if (ctx.message.voice) {
+        await ctx.api.sendVoice(gid, ctx.message.voice.file_id, { caption: ctx.message.caption || undefined });
+      } else if (ctx.message.video) {
+        await ctx.api.sendVideo(gid, ctx.message.video.file_id, { caption: ctx.message.caption || undefined });
+      } else if (ctx.message.sticker) {
+        await ctx.api.sendSticker(gid, ctx.message.sticker.file_id);
+      }
+    }
+
+    // Or post to channel with comments buttons, if configured
+    // Note: Admin messages posted via bot won't show admin badge - admin must post directly to channel for badge
+    if (env.TARGET_CHANNEL_ID) {
+      const cid = env.TARGET_CHANNEL_ID;
+      const isUserAdmin = isAdmin(fromId);
+      console.log(`[Channel] Attempting to post to channel ${cid} from user ${fromId}`);
+      console.log(`[Channel] Admin check: userId=${fromId}, ADMIN_IDS=${JSON.stringify(env.ADMIN_IDS)}, isAdmin=${isUserAdmin}`);
+      try {
+        // Add "UnKnown vent (N)" prefix for non-admin users
+        let ventPrefix = "";
+        if (!isUserAdmin) {
+          ventCounter++;
+          ventPrefix = `UnKnown vent (${ventCounter})\n\n`;
+          console.log(`[Channel] ✅ Adding vent prefix: "UnKnown vent (${ventCounter})" for user ${fromId}`);
+        } else {
+          console.log(`[Channel] ⚠️ User ${fromId} is admin - skipping vent prefix`);
+        }
+        
+        // Send to channel as the bot
+        // Note: To show bot name instead of channel name, ensure channel settings allow bot signatures
+        const sent = await (async () => {
+          if (ctx.message.text) {
+            const messageText = ventPrefix + ctx.message.text;
+            return await ctx.api.sendMessage(cid, messageText, {
+              // Ensure message is sent as bot (this is default when bot is admin)
+            });
+          } else if (ctx.message.photo) {
+            const largest = ctx.message.photo[ctx.message.photo.length - 1];
+            const caption = ctx.message.caption ? ventPrefix + ctx.message.caption : (ventPrefix ? ventPrefix.trim() : undefined);
+            return await ctx.api.sendPhoto(cid, largest.file_id, { 
+              caption: caption
+            });
+          } else if (ctx.message.document) {
+            const caption = ctx.message.caption ? ventPrefix + ctx.message.caption : (ventPrefix ? ventPrefix.trim() : undefined);
+            return await ctx.api.sendDocument(cid, ctx.message.document.file_id, { 
+              caption: caption
+            });
+          } else if (ctx.message.audio) {
+            const caption = ctx.message.caption ? ventPrefix + ctx.message.caption : (ventPrefix ? ventPrefix.trim() : undefined);
+            return await ctx.api.sendAudio(cid, ctx.message.audio.file_id, { 
+              caption: caption
+            });
+          } else if (ctx.message.voice) {
+            const caption = ctx.message.caption ? ventPrefix + ctx.message.caption : (ventPrefix ? ventPrefix.trim() : undefined);
+            return await ctx.api.sendVoice(cid, ctx.message.voice.file_id, { 
+              caption: caption
+            });
+          } else if (ctx.message.video) {
+            const caption = ctx.message.caption ? ventPrefix + ctx.message.caption : (ventPrefix ? ventPrefix.trim() : undefined);
+            return await ctx.api.sendVideo(cid, ctx.message.video.file_id, { 
+              caption: caption
+            });
+          } else if (ctx.message.sticker) {
+            // For stickers, send vent prefix as separate message first, then sticker
+            if (ventPrefix) {
+              await ctx.api.sendMessage(cid, ventPrefix.trim());
+            }
+            return await ctx.api.sendSticker(cid, ctx.message.sticker.file_id);
+          }
+          return undefined;
+        })();
+
+        if (sent) {
+          console.log(`[Channel] ✅ Successfully posted message ${sent.message_id} to channel${ventPrefix ? ` with prefix: "${ventPrefix.trim()}"` : ''}`);
+          
+          // Add buttons: Add comment, View comments
+          await updateChannelButtons(sent.message_id);
+        } else {
+          console.log(`[Channel] ⚠️ No message sent (unsupported type)`);
+        }
+      } catch (error: any) {
+        console.error(`[Channel] ❌ Failed to post to channel ${cid}:`, error.description || error.message);
+        console.error(`[Channel] Error code: ${error.error_code}, Full error:`, error);
+        // Don't crash - just log the error
+        // Common causes: bot not added to channel, wrong channel ID, no permission
+      }
+    }
+
+    // Acknowledge to user (optional, to avoid clutter we keep it minimal)
+    if (!isAdmin(fromId)) {
+      await ctx.reply("Your message was delivered anonymously.");
+    } else if (env.TARGET_CHANNEL_ID) {
+      // Admin messages also posted to channel
+      await ctx.reply("✅ Your message was posted to the channel.");
+    }
+  });
+
+
+
+  // Global error handler
+  bot.catch((err) => {
+    const ctx = err.ctx;
+    console.error(`Error handling update ${ctx.update.update_id}:`, err.error);
+    // Don't crash - just log
+  });
+
+  return bot;
+}
+
+
