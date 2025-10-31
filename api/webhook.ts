@@ -47,15 +47,19 @@ export default async function handler(req: any, res: any) {
 
   try {
     console.log("[Webhook] Creating bot instance...");
+    console.log("[Webhook] Request body:", JSON.stringify(req.body, null, 2));
     const bot = createBot({ BOT_TOKEN: token, ADMIN_IDS: adminIds, TARGET_GROUP_ID: groupId, TARGET_CHANNEL_ID: channelId, BOT_USERNAME: botUsername, CHANNEL_USERNAME: channelUsername });
     
     console.log("[Webhook] Handling update...");
+    console.log("[Webhook] Update type:", req.body?.message ? "message" : req.body?.callback_query ? "callback_query" : "unknown");
     await bot.handleUpdate(req.body);
-    console.log("[Webhook] Update handled successfully");
+    console.log("[Webhook] ✅ Update handled successfully");
     res.status(200).json({ ok: true });
   } catch (err: any) {
-    console.error("[Webhook] Error handling update:", err);
-    console.error("[Webhook] Error stack:", err?.stack);
+    console.error("[Webhook] ❌ Error handling update:", err);
+    console.error("[Webhook] ❌ Error message:", err?.message);
+    console.error("[Webhook] ❌ Error stack:", err?.stack);
+    console.error("[Webhook] ❌ Full error:", JSON.stringify(err, Object.getOwnPropertyNames(err)));
     res.status(200).json({ ok: true }); // Always 200 to satisfy Telegram retries
   }
 }
