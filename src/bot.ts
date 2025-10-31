@@ -17,14 +17,14 @@ type Comment = {
 	userId: number; // stored but not shown to users (for moderation)
 };
 
+// Module-level state that persists across warm serverless function invocations
+const channelComments = new Map<number, Comment[]>(); // channelMsgId -> comments array
+const userIdToPendingChannelMsg = new Map<number, number>(); // userId -> channelMsgId (when adding comment)
+let ventCounter = 0; // Counter for "UnKnown vent" numbering
+let commentIdCounter = 0; // Counter for unique comment IDs
+
 export function createBot(env: EnvConfig) {
 	const bot = new Bot<Context>(env.BOT_TOKEN);
-
-	// In-memory state for channel comments mode
-	const channelComments = new Map<number, Comment[]>(); // channelMsgId -> comments array
-	const userIdToPendingChannelMsg = new Map<number, number>(); // userId -> channelMsgId (when adding comment)
-	let ventCounter = 0; // Counter for "UnKnown vent" numbering
-	let commentIdCounter = 0; // Counter for unique comment IDs
 
   // Helper function to update channel post buttons
   const updateChannelButtons = async (channelMsgId: number) => {
