@@ -5,6 +5,11 @@ node_modules/
 # Builds
 /dist/
 
+# Public directory (should be committed but ignore contents except index.html)
+/public/*
+!/public/.gitkeep
+!/public/index.html
+
 # Env files (keep env.example tracked)
 .env
 .env.*
