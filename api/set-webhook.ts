@@ -42,7 +42,9 @@ export default async function handler(req: any, res: any) {
 
   try {
     console.log("[SetWebhook] Creating bot instance...");
-    const webhookUrl = `${publicUrl}/api/webhook`;
+    // Remove trailing slash from publicUrl if present
+    const baseUrl = publicUrl.replace(/\/$/, '');
+    const webhookUrl = `${baseUrl}/api/webhook`;
     console.log("[SetWebhook] Setting webhook to:", webhookUrl);
     await bot.api.setWebhook(webhookUrl);
     console.log("[SetWebhook] ✅ Webhook set successfully");
