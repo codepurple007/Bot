@@ -23,6 +23,9 @@ const userIdToPendingChannelMsg = new Map<number, number>(); // userId -> channe
 let ventCounter = 0; // Counter for "UnKnown vent" numbering
 let commentIdCounter = 0; // Counter for unique comment IDs
 
+// Log state on module load/reload
+console.log(`[State] Module loaded. Initial ventCounter: ${ventCounter}, commentIdCounter: ${commentIdCounter}`);
+
 export function createBot(env: EnvConfig) {
 	const bot = new Bot<Context>(env.BOT_TOKEN);
 
@@ -481,12 +484,15 @@ export function createBot(env: EnvConfig) {
         // Add "UnKnown vent (N)" prefix for non-admin users
         let ventPrefix = "";
         if (!isUserAdmin) {
+          const previousCounter = ventCounter;
           ventCounter++;
           ventPrefix = `UnKnown vent (${ventCounter})\n\n`;
+          console.log(`[Channel] ✅ Vent counter incremented: ${previousCounter} → ${ventCounter}`);
           console.log(`[Channel] ✅ Adding vent prefix: "UnKnown vent (${ventCounter})" for user ${fromId}`);
           console.log(`[Channel] Current ventCounter value: ${ventCounter}`);
         } else {
           console.log(`[Channel] ⚠️ User ${fromId} is admin - skipping vent prefix`);
+          console.log(`[Channel] Current ventCounter value (not incremented): ${ventCounter}`);
         }
         
         // Send to channel as the bot
