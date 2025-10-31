@@ -60,6 +60,11 @@ export default async function handler(req: any, res: any) {
     console.log("[Webhook] Request body:", JSON.stringify(req.body, null, 2));
     const bot = createBot({ BOT_TOKEN: token, ADMIN_IDS: adminIds, TARGET_GROUP_ID: groupId, TARGET_CHANNEL_ID: channelId, BOT_USERNAME: botUsername, CHANNEL_USERNAME: channelUsername });
     
+    // Initialize bot before handling updates
+    console.log("[Webhook] Initializing bot...");
+    await bot.init();
+    console.log("[Webhook] Bot initialized successfully");
+    
     console.log("[Webhook] Handling update...");
     console.log("[Webhook] Update type:", req.body?.message ? "message" : req.body?.callback_query ? "callback_query" : "unknown");
     
