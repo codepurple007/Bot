@@ -33,7 +33,7 @@ export function createBot(env: EnvConfig) {
       return;
     }
     
-    const addUrl = `https://t.me/${env.BOT_USERNAME}?start=comment_${channelMsgId}`;
+    const commentUrl = `https://t.me/${env.BOT_USERNAME}?start=comment_direct`;
     const viewUrl = `https://t.me/${env.BOT_USERNAME}?start=view_${channelMsgId}`;
     
     // Get comment count for this channel message
@@ -49,7 +49,7 @@ export function createBot(env: EnvConfig) {
     console.log(`[Channel] - All stored channel comments keys:`, Array.from(channelComments.keys()));
     
     const kb = new InlineKeyboard();
-    kb.url("Add comment", addUrl);
+    kb.url("Comment", commentUrl);
     kb.url(viewButtonText, viewUrl);
     
     try {
@@ -86,7 +86,19 @@ export function createBot(env: EnvConfig) {
 		const payload = ctx.match as unknown as string | undefined;
 		const startParam = typeof payload === "string" ? payload.trim() : "";
 		
-		// Handle "Add comment" button click
+		// Handle "Comment" button click (posts directly to channel)
+		if (startParam === "comment_direct") {
+			console.log(`[CommentDirect] User ${ctx.from?.id} wants to post directly to channel`);
+			// Set a special marker to indicate direct channel post
+			userIdToPendingChannelMsg.set(ctx.from!.id, -1); // -1 means direct post, not a comment
+			await ctx.reply(
+				"💬 Send your message now. It will be posted directly to the channel.",
+				{ link_preview_options: { is_disabled: true }, parse_mode: "HTML" }
+			);
+			return;
+		}
+		
+		// Handle "Add a comment" button click (adds comment to specific post)
 		const commentMatch = startParam.match(/^comment_(\d+)$/);
 		if (commentMatch) {
 			const channelMsgId = Number(commentMatch[1]);
@@ -384,14 +396,15 @@ export function createBot(env: EnvConfig) {
       await updateChannelButtons(channelMsgId);
       console.log(`[Comment] Button update completed for channel message ${channelMsgId}`);
       
-      await ctx.reply(
-        "✅ Your anonymous comment was added! Others can view it by clicking 'View comments' on the channel post.",
-        { link_preview_options: { is_disabled: true } }
-      );
-      console.log(`[Comment] ✅ Comment flow completed - returning early to prevent channel posting`);
-      return; // CRITICAL: Return early to prevent this message from being posted to channel
+        await ctx.reply(
+          "✅ Your anonymous comment was added! Others can view it by clicking 'View comments' on the channel post.",
+          { link_preview_options: { is_disabled: true } }
+        );
+        console.log(`[Comment] ✅ Comment flow completed - returning early to prevent channel posting`);
+        return; // CRITICAL: Return early to prevent this message from being posted to channel
+      }
     } else {
-      console.log(`[Comment] User ${fromId} does NOT have pending comment - message will proceed to channel posting`);
+      console.log(`[Comment] User ${fromId} does NOT have pending action - message will proceed to channel posting`);
     }
 
     // From normal user → forward to admin with embedded ID
