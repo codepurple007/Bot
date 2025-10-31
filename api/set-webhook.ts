@@ -46,9 +46,27 @@ export default async function handler(req: any, res: any) {
     const baseUrl = publicUrl.replace(/\/$/, '');
     const webhookUrl = `${baseUrl}/api/webhook`;
     console.log("[SetWebhook] Setting webhook to:", webhookUrl);
-    await bot.api.setWebhook(webhookUrl);
+    
+    // Set webhook and verify it
+    const setResult = await bot.api.setWebhook(webhookUrl);
+    console.log("[SetWebhook] setWebhook result:", setResult);
+    
+    // Get webhook info to verify
+    const webhookInfo = await bot.api.getWebhookInfo();
+    console.log("[SetWebhook] Webhook info:", JSON.stringify(webhookInfo, null, 2));
+    
+    if (webhookInfo.url !== webhookUrl) {
+      console.error("[SetWebhook] ⚠️ Warning: Webhook URL mismatch!");
+      console.error("[SetWebhook] Expected:", webhookUrl);
+      console.error("[SetWebhook] Got:", webhookInfo.url);
+    }
+    
     console.log("[SetWebhook] ✅ Webhook set successfully");
-    res.status(200).json({ ok: true, webhookUrl });
+    res.status(200).json({ 
+      ok: true, 
+      webhookUrl,
+      webhookInfo: webhookInfo
+    });
   } catch (err: any) {
     console.error("[SetWebhook] ❌ Error:", err);
     console.error("[SetWebhook] ❌ Error message:", err?.message);
