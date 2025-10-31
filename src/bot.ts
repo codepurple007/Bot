@@ -338,64 +338,70 @@ export function createBot(env: EnvConfig) {
       return;
     }
 
-    // Channel comments flow: if user previously clicked Add comment
-    console.log(`[Comment] Checking if user ${fromId} has pending comment. Map has ${userIdToPendingChannelMsg.size} entries.`);
+    // Channel comments flow: if user previously clicked Comment or Add comment
+    console.log(`[Comment] Checking if user ${fromId} has pending action. Map has ${userIdToPendingChannelMsg.size} entries.`);
     console.log(`[Comment] Map contents:`, Array.from(userIdToPendingChannelMsg.entries()));
     
     if (ctx.chat?.type === "private" && userIdToPendingChannelMsg.has(fromId)) {
       const channelMsgId = userIdToPendingChannelMsg.get(fromId)!;
       userIdToPendingChannelMsg.delete(fromId);
 
-      console.log(`[Comment] ✅ User ${fromId} wants to add comment to channel message ${channelMsgId}`);
-      console.log(`[Comment] ⚠️ IMPORTANT: This message will NOT be posted to channel, only stored as comment`);
-      
-      // Extract comment text
-      let commentText: string;
-      if (ctx.message.text) {
-        commentText = ctx.message.text;
-      } else if (ctx.message.caption) {
-        commentText = ctx.message.caption;
-      } else if (ctx.message.photo) {
-        commentText = "[Photo]";
-      } else if (ctx.message.document) {
-        commentText = `[Document: ${ctx.message.document.file_name || "file"}]`;
-      } else if (ctx.message.audio) {
-        commentText = `[Audio: ${ctx.message.audio.title || "audio"}]`;
-      } else if (ctx.message.voice) {
-        commentText = "[Voice message]";
-      } else if (ctx.message.video) {
-        commentText = "[Video]";
-      } else if (ctx.message.sticker) {
-        commentText = "[Sticker]";
+      // If channelMsgId is -1, this is a direct channel post (Comment button) - let it proceed
+      if (channelMsgId === -1) {
+        console.log(`[CommentDirect] ✅ User ${fromId} wants to post directly to channel - proceeding to channel posting`);
+        // Don't return - let it fall through to channel posting logic below
       } else {
-        await ctx.reply("❌ Unsupported message type for comment. Please send text, photo, or media with caption.");
-        return;
-      }
+        // This is adding a comment to a specific post
+        console.log(`[Comment] ✅ User ${fromId} wants to add comment to channel message ${channelMsgId}`);
+        console.log(`[Comment] ⚠️ IMPORTANT: This message will NOT be posted to channel, only stored as comment`);
+        
+        // Extract comment text
+        let commentText: string;
+        if (ctx.message.text) {
+          commentText = ctx.message.text;
+        } else if (ctx.message.caption) {
+          commentText = ctx.message.caption;
+        } else if (ctx.message.photo) {
+          commentText = "[Photo]";
+        } else if (ctx.message.document) {
+          commentText = `[Document: ${ctx.message.document.file_name || "file"}]`;
+        } else if (ctx.message.audio) {
+          commentText = `[Audio: ${ctx.message.audio.title || "audio"}]`;
+        } else if (ctx.message.voice) {
+          commentText = "[Voice message]";
+        } else if (ctx.message.video) {
+          commentText = "[Video]";
+        } else if (ctx.message.sticker) {
+          commentText = "[Sticker]";
+        } else {
+          await ctx.reply("❌ Unsupported message type for comment. Please send text, photo, or media with caption.");
+          return;
+        }
 
-      // Store comment in memory
-      commentIdCounter++;
-      const comment: Comment = {
-        id: commentIdCounter,
-        text: commentText,
-        timestamp: Date.now(),
-        userId: fromId
-      };
+        // Store comment in memory
+        commentIdCounter++;
+        const comment: Comment = {
+          id: commentIdCounter,
+          text: commentText,
+          timestamp: Date.now(),
+          userId: fromId
+        };
 
-      // Get or create comments array for this channel message
-      if (!channelComments.has(channelMsgId)) {
-        channelComments.set(channelMsgId, []);
-      }
-      channelComments.get(channelMsgId)!.push(comment);
+        // Get or create comments array for this channel message
+        if (!channelComments.has(channelMsgId)) {
+          channelComments.set(channelMsgId, []);
+        }
+        channelComments.get(channelMsgId)!.push(comment);
 
-      const totalComments = channelComments.get(channelMsgId)!.length;
-      console.log(`[Comment] ✅ Comment stored for channel message ${channelMsgId}. Total comments: ${totalComments}`);
-      console.log(`[Comment] All comments for ${channelMsgId}:`, channelComments.get(channelMsgId));
-      
-      // Update the channel buttons to show new comment count
-      console.log(`[Comment] Updating buttons for channel message ${channelMsgId}...`);
-      await updateChannelButtons(channelMsgId);
-      console.log(`[Comment] Button update completed for channel message ${channelMsgId}`);
-      
+        const totalComments = channelComments.get(channelMsgId)!.length;
+        console.log(`[Comment] ✅ Comment stored for channel message ${channelMsgId}. Total comments: ${totalComments}`);
+        console.log(`[Comment] All comments for ${channelMsgId}:`, channelComments.get(channelMsgId));
+        
+        // Update the channel buttons to show new comment count
+        console.log(`[Comment] Updating buttons for channel message ${channelMsgId}...`);
+        await updateChannelButtons(channelMsgId);
+        console.log(`[Comment] Button update completed for channel message ${channelMsgId}`);
+        
         await ctx.reply(
           "✅ Your anonymous comment was added! Others can view it by clicking 'View comments' on the channel post.",
           { link_preview_options: { is_disabled: true } }
