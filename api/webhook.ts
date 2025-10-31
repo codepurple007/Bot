@@ -13,6 +13,15 @@ export default async function handler(req: any, res: any) {
   });
 
   if (req.method !== "POST") {
+    // Allow GET for testing/debugging
+    if (req.method === "GET") {
+      res.status(200).json({ 
+        message: "Webhook endpoint is active. Telegram sends POST requests here.",
+        method: req.method,
+        expectedMethod: "POST"
+      });
+      return;
+    }
     res.status(405).send("Method Not Allowed");
     return;
   }
