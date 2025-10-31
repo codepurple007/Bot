@@ -2,12 +2,6 @@ import { createBot } from "../src/bot.js";
 
 // Vercel serverless handler for Telegram webhook
 export default async function handler(req: any, res: any) {
-  // Immediately send 200 OK to Telegram to acknowledge receipt
-  // This prevents Telegram from retrying and building up pending updates
-  if (req.method === "POST") {
-    res.status(200).json({ ok: true });
-  }
-  
   console.log("[Webhook] Request received:", {
     method: req.method,
     hasBody: !!req.body,
@@ -69,12 +63,10 @@ export default async function handler(req: any, res: any) {
     console.log("[Webhook] Handling update...");
     console.log("[Webhook] Update type:", req.body?.message ? "message" : req.body?.callback_query ? "callback_query" : "unknown");
     
-    // Process update asynchronously (don't await - we already sent 200 OK)
-    bot.handleUpdate(req.body).catch((err: any) => {
-      console.error("[Webhook] Error in async processing:", err);
-    });
-    
-    console.log("[Webhook] ✅ Update queued for processing");
+    // Process update and respond
+    await bot.handleUpdate(req.body);
+    console.log("[Webhook] ✅ Update handled successfully");
+    res.status(200).json({ ok: true });
   } catch (err: any) {
     console.error("[Webhook] ❌ Error handling update:", err);
     console.error("[Webhook] ❌ Error message:", err?.message);
