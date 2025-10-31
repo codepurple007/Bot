@@ -49,7 +49,7 @@ export function createBot(env: EnvConfig) {
     console.log(`[Channel] - All stored channel comments keys:`, Array.from(channelComments.keys()));
     
     const kb = new InlineKeyboard();
-    kb.url("Add comment", addUrl).row();
+    kb.url("Add comment", addUrl);
     kb.url(viewButtonText, viewUrl);
     
     try {
@@ -327,11 +327,15 @@ export function createBot(env: EnvConfig) {
     }
 
     // Channel comments flow: if user previously clicked Add comment
+    console.log(`[Comment] Checking if user ${fromId} has pending comment. Map has ${userIdToPendingChannelMsg.size} entries.`);
+    console.log(`[Comment] Map contents:`, Array.from(userIdToPendingChannelMsg.entries()));
+    
     if (ctx.chat?.type === "private" && userIdToPendingChannelMsg.has(fromId)) {
       const channelMsgId = userIdToPendingChannelMsg.get(fromId)!;
       userIdToPendingChannelMsg.delete(fromId);
 
-      console.log(`[Comment] User ${fromId} wants to add comment to channel message ${channelMsgId}`);
+      console.log(`[Comment] ✅ User ${fromId} wants to add comment to channel message ${channelMsgId}`);
+      console.log(`[Comment] ⚠️ IMPORTANT: This message will NOT be posted to channel, only stored as comment`);
       
       // Extract comment text
       let commentText: string;
@@ -384,7 +388,10 @@ export function createBot(env: EnvConfig) {
         "✅ Your anonymous comment was added! Others can view it by clicking 'View comments' on the channel post.",
         { link_preview_options: { is_disabled: true } }
       );
-      return;
+      console.log(`[Comment] ✅ Comment flow completed - returning early to prevent channel posting`);
+      return; // CRITICAL: Return early to prevent this message from being posted to channel
+    } else {
+      console.log(`[Comment] User ${fromId} does NOT have pending comment - message will proceed to channel posting`);
     }
 
     // From normal user → forward to admin with embedded ID
@@ -458,6 +465,7 @@ export function createBot(env: EnvConfig) {
           ventCounter++;
           ventPrefix = `UnKnown vent (${ventCounter})\n\n`;
           console.log(`[Channel] ✅ Adding vent prefix: "UnKnown vent (${ventCounter})" for user ${fromId}`);
+          console.log(`[Channel] Current ventCounter value: ${ventCounter}`);
         } else {
           console.log(`[Channel] ⚠️ User ${fromId} is admin - skipping vent prefix`);
         }
