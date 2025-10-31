@@ -28,7 +28,10 @@ export function createBot(env: EnvConfig) {
 
   // Helper function to update channel post buttons
   const updateChannelButtons = async (channelMsgId: number) => {
-    if (!env.TARGET_CHANNEL_ID || !env.BOT_USERNAME) return;
+    if (!env.TARGET_CHANNEL_ID || !env.BOT_USERNAME) {
+      console.log(`[Channel] Cannot update buttons: missing TARGET_CHANNEL_ID or BOT_USERNAME`);
+      return;
+    }
     
     const addUrl = `https://t.me/${env.BOT_USERNAME}?start=comment_${channelMsgId}`;
     const viewUrl = `https://t.me/${env.BOT_USERNAME}?start=view_${channelMsgId}`;
@@ -36,7 +39,8 @@ export function createBot(env: EnvConfig) {
     // Get comment count for this channel message
     const comments = channelComments.get(channelMsgId) || [];
     const commentCount = comments.length;
-    const viewButtonText = commentCount > 0 ? `View comments (${commentCount})` : "View comments";
+    // Always show count in parentheses, even if 0
+    const viewButtonText = `View comments (${commentCount})`;
     
     console.log(`[Channel] Updating buttons for message ${channelMsgId}:`);
     console.log(`[Channel] - Comment count: ${commentCount}`);
@@ -45,7 +49,7 @@ export function createBot(env: EnvConfig) {
     console.log(`[Channel] - All stored channel comments keys:`, Array.from(channelComments.keys()));
     
     const kb = new InlineKeyboard();
-    kb.url("Add comment", addUrl);
+    kb.url("Add comment", addUrl).row();
     kb.url(viewButtonText, viewUrl);
     
     try {
@@ -87,6 +91,7 @@ export function createBot(env: EnvConfig) {
 		if (commentMatch) {
 			const channelMsgId = Number(commentMatch[1]);
 			if (Number.isFinite(channelMsgId)) {
+				console.log(`[AddComment] User ${ctx.from?.id} wants to add comment to channel message ${channelMsgId}`);
 				userIdToPendingChannelMsg.set(ctx.from!.id, channelMsgId);
 				await ctx.reply(
 					"💬 Send your anonymous comment now. It will be added to the post.",
@@ -101,8 +106,11 @@ export function createBot(env: EnvConfig) {
 		if (viewMatch) {
 			const channelMsgId = Number(viewMatch[1]);
 			if (Number.isFinite(channelMsgId)) {
+				console.log(`[ViewComments] User ${ctx.from?.id} viewing comments for channel message ${channelMsgId}`);
 				const comments = channelComments.get(channelMsgId) || [];
 				const commentsText = formatComments(comments);
+				
+				console.log(`[ViewComments] Found ${comments.length} comments for message ${channelMsgId}`);
 				
 				// Update button to ensure count is current
 				await updateChannelButtons(channelMsgId);
