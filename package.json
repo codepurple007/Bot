@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vercel dev",
-    "build": "tsc -p .",
+    "build": "node scripts/ensure-public.js",
     "start": "node dist/local.js",
     "typecheck": "tsc -p . --noEmit"
   },
