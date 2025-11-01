@@ -294,7 +294,7 @@ export function createBot(env: EnvConfig) {
       return;
     }
     
-    const comments = channelComments.get(channelMsgId) || [];
+    const comments = await getComments(channelMsgId);
     const commentCount = comments.length;
     
     try {
@@ -554,15 +554,16 @@ export function createBot(env: EnvConfig) {
         // Add "UnKnown vent (N)" prefix for non-admin users
         let ventPrefix = "";
         if (!isUserAdmin) {
-          const previousCounter = ventCounter;
-          ventCounter++;
-          ventPrefix = `UnKnown vent (${ventCounter})\n\n`;
-          console.log(`[Channel] ✅ Vent counter incremented: ${previousCounter} → ${ventCounter}`);
-          console.log(`[Channel] ✅ Adding vent prefix: "UnKnown vent (${ventCounter})" for user ${fromId}`);
-          console.log(`[Channel] Current ventCounter value: ${ventCounter}`);
+          const previousCounter = await getVentCounter();
+          const newCounter = await incrementVentCounter();
+          ventPrefix = `UnKnown vent (${newCounter})\n\n`;
+          console.log(`[Channel] ✅ Vent counter incremented in KV: ${previousCounter} → ${newCounter}`);
+          console.log(`[Channel] ✅ Adding vent prefix: "UnKnown vent (${newCounter})" for user ${fromId}`);
+          console.log(`[Channel] Current ventCounter value: ${newCounter}`);
         } else {
+          const currentCounter = await getVentCounter();
           console.log(`[Channel] ⚠️ User ${fromId} is admin - skipping vent prefix`);
-          console.log(`[Channel] Current ventCounter value (not incremented): ${ventCounter}`);
+          console.log(`[Channel] Current ventCounter value (not incremented): ${currentCounter}`);
         }
         
         // Send to channel as the bot
