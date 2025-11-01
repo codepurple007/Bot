@@ -27,7 +27,7 @@ async function main() {
   console.log(`Token loaded: ${token.substring(0, 20)}... (length: ${token.length})`);
   console.log(`Channel ID: ${channelId}, Bot: @${botUsername}`);
   
-  const bot = createBot({ BOT_TOKEN: token, ADMIN_IDS: adminIds, TARGET_GROUP_ID: groupId, TARGET_CHANNEL_ID: channelId, BOT_USERNAME: botUsername, CHANNEL_USERNAME: channelUsername });
+  const bot = await createBot({ BOT_TOKEN: token, ADMIN_IDS: adminIds, TARGET_GROUP_ID: groupId, TARGET_CHANNEL_ID: channelId, BOT_USERNAME: botUsername, CHANNEL_USERNAME: channelUsername });
   try {
     await bot.api.deleteWebhook({ drop_pending_updates: true });
   } catch (e: any) {
