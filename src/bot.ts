@@ -113,11 +113,14 @@ export function createBot(env: EnvConfig) {
 	// Test KV connectivity on bot creation
 	(async () => {
 		try {
-			await kv.ping();
+			// Try a simple get operation to test KV connectivity
+			await kv.get("__kv_test__");
 			console.log(`[KV] ✅ KV connection test successful`);
 		} catch (err: any) {
 			console.error(`[KV] ❌ KV connection test failed:`, err?.message || err);
-			console.error(`[KV] ❌ Check if KV_REST_API_URL and KV_REST_API_TOKEN are set in Vercel environment variables`);
+			console.error(`[KV] ❌ Error details:`, JSON.stringify(err, null, 2));
+			console.error(`[KV] ❌ Check if Vercel KV is added to your project via Marketplace`);
+			console.error(`[KV] ❌ Required env vars: KV_REST_API_URL, KV_REST_API_TOKEN (or UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)`);
 		}
 	})();
 
