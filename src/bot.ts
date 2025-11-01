@@ -25,9 +25,11 @@ const userIdToPendingChannelMsg = new Map<number, number>(); // userId -> channe
 async function getComments(channelMsgId: number): Promise<Comment[]> {
 	try {
 		const comments = await kv.get<Comment[]>(`comments:${channelMsgId}`);
+		console.log(`[KV] ✅ Retrieved ${comments?.length || 0} comments for message ${channelMsgId}`);
 		return comments || [];
-	} catch (err) {
-		console.error(`[KV] Error getting comments for ${channelMsgId}:`, err);
+	} catch (err: any) {
+		console.error(`[KV] ❌ Error getting comments for ${channelMsgId}:`, err?.message || err);
+		console.error(`[KV] ❌ Error details:`, JSON.stringify(err, null, 2));
 		return [];
 	}
 }
@@ -35,17 +37,21 @@ async function getComments(channelMsgId: number): Promise<Comment[]> {
 async function setComments(channelMsgId: number, comments: Comment[]): Promise<void> {
 	try {
 		await kv.set(`comments:${channelMsgId}`, comments);
-	} catch (err) {
-		console.error(`[KV] Error setting comments for ${channelMsgId}:`, err);
+		console.log(`[KV] ✅ Saved ${comments.length} comments to KV for message ${channelMsgId}`);
+	} catch (err: any) {
+		console.error(`[KV] ❌ Error setting comments for ${channelMsgId}:`, err?.message || err);
+		console.error(`[KV] ❌ Error details:`, JSON.stringify(err, null, 2));
 	}
 }
 
 async function getVentCounter(): Promise<number> {
 	try {
 		const counter = await kv.get<number>("ventCounter");
+		console.log(`[KV] ✅ Retrieved ventCounter: ${counter || 0}`);
 		return counter || 0;
-	} catch (err) {
-		console.error(`[KV] Error getting ventCounter:`, err);
+	} catch (err: any) {
+		console.error(`[KV] ❌ Error getting ventCounter:`, err?.message || err);
+		console.error(`[KV] ❌ Error details:`, JSON.stringify(err, null, 2));
 		return 0;
 	}
 }
@@ -53,17 +59,20 @@ async function getVentCounter(): Promise<number> {
 async function incrementVentCounter(): Promise<number> {
 	try {
 		const newValue = await kv.incr("ventCounter");
+		console.log(`[KV] ✅ Incremented ventCounter to: ${newValue}`);
 		return newValue;
-	} catch (err) {
-		console.error(`[KV] Error incrementing ventCounter:`, err);
+	} catch (err: any) {
+		console.error(`[KV] ❌ Error incrementing ventCounter:`, err?.message || err);
+		console.error(`[KV] ❌ Error details:`, JSON.stringify(err, null, 2));
 		// Fallback: try to get and set manually
 		try {
 			const current = await getVentCounter();
 			const newValue = current + 1;
 			await kv.set("ventCounter", newValue);
+			console.log(`[KV] ✅ Fallback: Set ventCounter to: ${newValue}`);
 			return newValue;
-		} catch (err2) {
-			console.error(`[KV] Fallback also failed:`, err2);
+		} catch (err2: any) {
+			console.error(`[KV] ❌ Fallback also failed:`, err2?.message || err2);
 			return 1; // Return 1 as fallback
 		}
 	}
@@ -132,6 +141,11 @@ export function createBot(env: EnvConfig) {
       console.log(`[Channel] ✅ Button text: "${viewButtonText}"`);
       console.log(`[Channel] ✅ API result:`, result);
     } catch (e: any) {
+      // Ignore "message is not modified" error - buttons are already correct
+      if (e.description?.includes("message is not modified") || e.description?.includes("not modified")) {
+        console.log(`[Channel] ℹ️ Buttons already up-to-date for message ${channelMsgId} (${commentCount} comments)`);
+        return;
+      }
       console.error(`[Channel] ❌ Failed to update buttons for message ${channelMsgId}:`, e.description || e.message);
       console.error(`[Channel] ❌ Error code:`, e.error_code);
       console.error(`[Channel] ❌ Full error:`, JSON.stringify(e, null, 2));
