@@ -109,6 +109,17 @@ async function incrementCommentIdCounter(): Promise<number> {
 
 export function createBot(env: EnvConfig) {
 	const bot = new Bot<Context>(env.BOT_TOKEN);
+	
+	// Test KV connectivity on bot creation
+	(async () => {
+		try {
+			await kv.ping();
+			console.log(`[KV] ✅ KV connection test successful`);
+		} catch (err: any) {
+			console.error(`[KV] ❌ KV connection test failed:`, err?.message || err);
+			console.error(`[KV] ❌ Check if KV_REST_API_URL and KV_REST_API_TOKEN are set in Vercel environment variables`);
+		}
+	})();
 
   // Helper function to update channel post buttons
   const updateChannelButtons = async (channelMsgId: number) => {
