@@ -63,9 +63,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    console.log("[Webhook] ====== STARTING WEBHOOK HANDLER ======");
     console.log("[Webhook] Creating bot instance...");
     console.log("[Webhook] Request body:", JSON.stringify(req.body, null, 2));
+    
     const bot = await createBot({ BOT_TOKEN: token, ADMIN_IDS: adminIds, TARGET_GROUP_ID: groupId, TARGET_CHANNEL_ID: channelId, BOT_USERNAME: botUsername, CHANNEL_USERNAME: channelUsername });
+    console.log("[Webhook] Bot instance created");
     
     // Initialize bot before handling updates
     console.log("[Webhook] Initializing bot...");
@@ -78,6 +81,7 @@ export default async function handler(req: any, res: any) {
     // Process update and respond
     await bot.handleUpdate(req.body);
     console.log("[Webhook] ✅ Update handled successfully");
+    console.log("[Webhook] ====== WEBHOOK HANDLER COMPLETE ======");
     res.status(200).json({ ok: true });
   } catch (err: any) {
     console.error("[Webhook] ❌ Error handling update:", err);
