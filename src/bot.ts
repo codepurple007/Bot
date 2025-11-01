@@ -1,4 +1,5 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
+import { kv } from "@vercel/kv";
 
 export type EnvConfig = {
 	BOT_TOKEN: string;
@@ -9,7 +10,7 @@ export type EnvConfig = {
 	CHANNEL_USERNAME?: string; // without @, for channel link
 };
 
-// Comment structure stored in memory
+// Comment structure stored in KV
 type Comment = {
 	id: number;
 	text: string;
@@ -17,14 +18,85 @@ type Comment = {
 	userId: number; // stored but not shown to users (for moderation)
 };
 
-// Module-level state that persists across warm serverless function invocations
-const channelComments = new Map<number, Comment[]>(); // channelMsgId -> comments array
+// Temporary in-memory state (only for current request flow)
 const userIdToPendingChannelMsg = new Map<number, number>(); // userId -> channelMsgId (when adding comment)
-let ventCounter = 0; // Counter for "UnKnown vent" numbering
-let commentIdCounter = 0; // Counter for unique comment IDs
 
-// Log state on module load/reload
-console.log(`[State] Module loaded. Initial ventCounter: ${ventCounter}, commentIdCounter: ${commentIdCounter}`);
+// KV helper functions
+async function getComments(channelMsgId: number): Promise<Comment[]> {
+	try {
+		const comments = await kv.get<Comment[]>(`comments:${channelMsgId}`);
+		return comments || [];
+	} catch (err) {
+		console.error(`[KV] Error getting comments for ${channelMsgId}:`, err);
+		return [];
+	}
+}
+
+async function setComments(channelMsgId: number, comments: Comment[]): Promise<void> {
+	try {
+		await kv.set(`comments:${channelMsgId}`, comments);
+	} catch (err) {
+		console.error(`[KV] Error setting comments for ${channelMsgId}:`, err);
+	}
+}
+
+async function getVentCounter(): Promise<number> {
+	try {
+		const counter = await kv.get<number>("ventCounter");
+		return counter || 0;
+	} catch (err) {
+		console.error(`[KV] Error getting ventCounter:`, err);
+		return 0;
+	}
+}
+
+async function incrementVentCounter(): Promise<number> {
+	try {
+		const newValue = await kv.incr("ventCounter");
+		return newValue;
+	} catch (err) {
+		console.error(`[KV] Error incrementing ventCounter:`, err);
+		// Fallback: try to get and set manually
+		try {
+			const current = await getVentCounter();
+			const newValue = current + 1;
+			await kv.set("ventCounter", newValue);
+			return newValue;
+		} catch (err2) {
+			console.error(`[KV] Fallback also failed:`, err2);
+			return 1; // Return 1 as fallback
+		}
+	}
+}
+
+async function getCommentIdCounter(): Promise<number> {
+	try {
+		const counter = await kv.get<number>("commentIdCounter");
+		return counter || 0;
+	} catch (err) {
+		console.error(`[KV] Error getting commentIdCounter:`, err);
+		return 0;
+	}
+}
+
+async function incrementCommentIdCounter(): Promise<number> {
+	try {
+		const newValue = await kv.incr("commentIdCounter");
+		return newValue;
+	} catch (err) {
+		console.error(`[KV] Error incrementing commentIdCounter:`, err);
+		// Fallback: try to get and set manually
+		try {
+			const current = await getCommentIdCounter();
+			const newValue = current + 1;
+			await kv.set("commentIdCounter", newValue);
+			return newValue;
+		} catch (err2) {
+			console.error(`[KV] Fallback also failed:`, err2);
+			return 1; // Return 1 as fallback
+		}
+	}
+}
 
 export function createBot(env: EnvConfig) {
 	const bot = new Bot<Context>(env.BOT_TOKEN);
@@ -39,8 +111,8 @@ export function createBot(env: EnvConfig) {
     const commentUrl = `https://t.me/${env.BOT_USERNAME}?start=comment_direct`;
     const viewUrl = `https://t.me/${env.BOT_USERNAME}?start=view_${channelMsgId}`;
     
-    // Get comment count for this channel message
-    const comments = channelComments.get(channelMsgId) || [];
+    // Get comment count for this channel message from KV
+    const comments = await getComments(channelMsgId);
     const commentCount = comments.length;
     // Always show count in parentheses, even if 0
     const viewButtonText = `View comments (${commentCount})`;
@@ -49,7 +121,6 @@ export function createBot(env: EnvConfig) {
     console.log(`[Channel] - Comment count: ${commentCount}`);
     console.log(`[Channel] - Comments array:`, comments);
     console.log(`[Channel] - Button text will be: "${viewButtonText}"`);
-    console.log(`[Channel] - All stored channel comments keys:`, Array.from(channelComments.keys()));
     
     const kb = new InlineKeyboard();
     kb.url("Comment", commentUrl);
@@ -122,7 +193,7 @@ export function createBot(env: EnvConfig) {
 			const channelMsgId = Number(viewMatch[1]);
 			if (Number.isFinite(channelMsgId)) {
 				console.log(`[ViewComments] User ${ctx.from?.id} viewing comments for channel message ${channelMsgId}`);
-				const comments = channelComments.get(channelMsgId) || [];
+				const comments = await getComments(channelMsgId);
 				const commentsText = formatComments(comments);
 				
 				console.log(`[ViewComments] Found ${comments.length} comments for message ${channelMsgId}`);
@@ -252,7 +323,7 @@ export function createBot(env: EnvConfig) {
       return;
     }
     
-    const comments = channelComments.get(channelMsgId) || [];
+    const comments = await getComments(channelMsgId);
     const commentCount = comments.length;
     
     if (commentCount === 0) {
@@ -381,24 +452,23 @@ export function createBot(env: EnvConfig) {
           return;
         }
 
-        // Store comment in memory
-        commentIdCounter++;
+        // Store comment in KV
+        const commentId = await incrementCommentIdCounter();
         const comment: Comment = {
-          id: commentIdCounter,
+          id: commentId,
           text: commentText,
           timestamp: Date.now(),
           userId: fromId
         };
 
-        // Get or create comments array for this channel message
-        if (!channelComments.has(channelMsgId)) {
-          channelComments.set(channelMsgId, []);
-        }
-        channelComments.get(channelMsgId)!.push(comment);
+        // Get existing comments, add new one, and save back to KV
+        const existingComments = await getComments(channelMsgId);
+        existingComments.push(comment);
+        await setComments(channelMsgId, existingComments);
 
-        const totalComments = channelComments.get(channelMsgId)!.length;
-        console.log(`[Comment] ✅ Comment stored for channel message ${channelMsgId}. Total comments: ${totalComments}`);
-        console.log(`[Comment] All comments for ${channelMsgId}:`, channelComments.get(channelMsgId));
+        const totalComments = existingComments.length;
+        console.log(`[Comment] ✅ Comment stored in KV for channel message ${channelMsgId}. Total comments: ${totalComments}`);
+        console.log(`[Comment] All comments for ${channelMsgId}:`, existingComments);
         
         // Update the channel buttons to show new comment count
         console.log(`[Comment] Updating buttons for channel message ${channelMsgId}...`);

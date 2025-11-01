@@ -13,9 +13,10 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
+    "@vercel/kv": "^3.0.0",
+    "dotenv": "^16.4.5",
     "grammy": "^1.21.1",
-    "undici": "^6.19.8",
-    "dotenv": "^16.4.5"
+    "undici": "^6.19.8"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
