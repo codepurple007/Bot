@@ -9,7 +9,9 @@ export default async function handler(req: any, res: any) {
     envVars: {
       hasToken: !!process.env.BOT_TOKEN,
       hasAdminIds: !!process.env.ADMIN_IDS,
-      adminIdsValue: process.env.ADMIN_IDS
+      adminIdsValue: process.env.ADMIN_IDS,
+      hasKvUrl: !!(process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL),
+      hasKvToken: !!(process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN)
     }
   });
 
@@ -42,7 +44,12 @@ export default async function handler(req: any, res: any) {
     hasToken: !!token,
     adminIdsCount: adminIds.length,
     adminIds: adminIds,
-    hasInvalidAdminIds: adminIds.some((n) => Number.isNaN(n))
+    hasInvalidAdminIds: adminIds.some((n) => Number.isNaN(n)),
+    kvConfig: {
+      hasKvUrl: !!(process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL),
+      hasKvToken: !!(process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN),
+      kvUrlSource: process.env.KV_REST_API_URL ? "KV_REST_API_URL" : process.env.UPSTASH_REDIS_REST_URL ? "UPSTASH_REDIS_REST_URL" : "none"
+    }
   });
 
   if (!token || adminIds.length === 0 || adminIds.some((n) => Number.isNaN(n))) {
